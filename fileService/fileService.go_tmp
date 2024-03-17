@@ -1,0 +1,203 @@
+package main
+
+import (
+	"archive/zip"
+	"bytes"
+	"database/sql"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/gorilla/mux"
+)
+
+const (
+	uploadDirectory   = "./uploads" // Change this to your desired upload directory
+	allowedExtensions = ".txt"      // Specify the allowed file extensions
+)
+
+// File represents the structure of the files table in the database
+type File struct {
+	ID              string    `json:"id"`
+	FileName        string    `json:"file_name"`
+	FileSize        int64     `json:"file_size"`
+	FileType        string    `json:"file_type"`
+	UploadTimestamp time.Time `json:"upload_timestamp"`
+}
+
+func main() {
+
+	router := mux.NewRouter()
+
+	// Define your API endpoints
+	router.HandleFunc("/upload", handleUpload).Methods("POST")
+
+	log.Fatal(http.ListenAndServe(":8080", router))
+}
+
+func handleUpload(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseMultipartForm(10 << 20) // 10 MB limit for file size
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	projectID := r.FormValue("project_id")
+
+	uploadPath := filepath.Join(uploadDirectory, projectID)
+	err = os.MkdirAll(uploadPath, os.ModePerm)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for _, fileHeader := range r.MultipartForm.File["files"] {
+		file, err := fileHeader.Open()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer file.Close()
+
+		fileID := generateUUID()
+		fileName := fileHeader.Filename
+		fileSize := fileHeader.Size
+		fileType := filepath.Ext(fileName)
+
+		err = storeFileDetails(fileID, fileName, fileSize, fileType, projectID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if isZipFile(file) {
+
+			fmt.Print("Hello")
+			err = extractZip(file, uploadPath)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		} else {
+			dst, err := os.Create(filepath.Join(uploadPath, fileName))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			defer dst.Close()
+
+			_, err = io.Copy(dst, file)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+
+	fmt.Fprintf(w, "Files uploaded successfully")
+}
+
+func isZipFile(file io.Reader) bool {
+	// Read the first 261 bytes to identify the file format
+	buffer := make([]byte, 261)
+	_, err := file.Read(buffer)
+	if err != nil && err != io.EOF {
+		return false
+	}
+
+	// Check if the file has the zip file signature
+	return bytes.HasPrefix(buffer, []byte("PK\x03\x04"))
+}
+
+func extractZip(zipFile io.Reader, destination string) error {
+	// Read the entire contents of the zip file into memory
+	fmt.Print("hello1")
+	zipData, err := io.ReadAll(zipFile)
+	if err != nil {
+		return err
+	}
+
+	fmt.Print("hello2")
+	// Create a reader from the byte slice
+	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		return err
+	}
+
+	fmt.Print("hello3")
+	for _, file := range zipReader.File {
+		filePath := filepath.Join(destination, file.Name)
+		if file.FileInfo().IsDir() {
+			os.MkdirAll(filePath, os.ModePerm)
+		} else {
+			os.MkdirAll(filepath.Dir(filePath), os.ModePerm)
+			dst, err := os.Create(filePath)
+			if err != nil {
+				return err
+			}
+			defer dst.Close()
+
+			src, err := file.Open()
+			if err != nil {
+				return err
+			}
+			defer src.Close()
+
+			_, err = io.Copy(dst, src)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func storeFileDetails(id, fileName string, fileSize int64, fileType, projectID string) error {
+
+	// Connection parameters
+	username := "root"
+	password := "rohan123"
+	host := "localhost"
+	port := "3306"
+	dbName := "File_Sharing_System"
+
+	// Create a DSN (Data Source Name)
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", username, password, host, port, dbName)
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	// Ping the database to check if the connection is successful
+	err = db.Ping()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Connected to MySQL!")
+
+	// Insert file details into the files table
+	_, err = db.Exec(`
+		INSERT INTO files (id, file_name, file_size, file_type, project_id)
+		VALUES (?, ?, ?, ?, ?)
+	`, id, fileName, fileSize, fileType, projectID)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func generateUUID() string {
+	// Implement your own UUID generation logic
+	return "generated_uuid"
+}

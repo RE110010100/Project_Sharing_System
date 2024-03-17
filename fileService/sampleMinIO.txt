@@ -1,0 +1,115 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/minio/minio-go/pkg/credentials"
+	"github.com/minio/minio-go/v7"
+)
+
+// Global variables for MinIO access key and secret key
+var (
+	accessKey = "minio_user"
+	secretKey = "minio_password"
+)
+
+// Function to create a new MinIO session
+func newMinioSession() (*minio.Client, error) {
+	// Initialize MinIO client object
+	endpoint := "localhost:9000" // MinIO endpoint
+
+	// Initialize minio client object
+	minioClient, err := minio.New(endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: false, // Enable secure (HTTPS) connection
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error creating MinIO client: %w", err)
+	}
+	return minioClient, nil
+}
+
+// Function to upload a file to a MinIO bucket
+func uploadFileToMinio(minioClient *minio.Client, bucketName, filePath string) error {
+	// Open the file
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("error opening file: %w", err)
+	}
+	defer file.Close()
+
+	// Get file stats to determine file size
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("error getting file info: %w", err)
+	}
+
+	// Create a context
+	ctx := context.Background()
+
+	// Upload the file to the bucket
+	_, err = minioClient.PutObject(ctx, bucketName, filePath, file, fileInfo.Size(), minio.PutObjectOptions{})
+	if err != nil {
+		return fmt.Errorf("error uploading file to bucket: %w", err)
+	}
+
+	fmt.Println("File uploaded successfully.")
+	return nil
+}
+
+// Function to download a file from a MinIO bucket
+func downloadFileFromMinio(minioClient *minio.Client, bucketName, objectName, filePath string) error {
+	// Create a context
+	ctx := context.Background()
+
+	// Open the file for writing
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("error creating file: %w", err)
+	}
+	defer file.Close()
+
+	// Download the object from the bucket
+	object, err := minioClient.GetObject(ctx, bucketName, objectName, minio.GetObjectOptions{})
+	if err != nil {
+		return fmt.Errorf("error downloading file from bucket: %w", err)
+	}
+
+	// Copy the object data to the file
+	_, err = io.Copy(file, object)
+	if err != nil {
+		return fmt.Errorf("error copying object data to file: %w", err)
+	}
+
+	fmt.Println("File downloaded successfully.")
+	return nil
+}
+
+/*func main() {
+// Create a new MinIO session
+minioClient, err := newMinioSession()
+if err != nil {
+	log.Fatalln("Error creating MinIO session:", err)
+}
+
+// Set the bucket name and file to upload
+bucketName := "projectfiles1"
+//filePath := "example.txt"
+objectName := "example.txt"
+filePath := "downloaded_file.txt"
+
+// Upload the file to the bucket
+/*err = uploadFileToMinio(minioClient, bucketName, filePath)
+if err != nil {
+	log.Fatalln("Error uploading file to MinIO:", err)
+}*/
+
+// Download the file from the bucket
+/*err = downloadFileFromMinio(minioClient, bucketName, objectName, filePath)
+	if err != nil {
+		log.Fatalln("Error downloading file from MinIO:", err)
+	}
+}*/
