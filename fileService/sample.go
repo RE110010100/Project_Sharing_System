@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +14,8 @@ import (
 
 	//"github.com/aws/aws-sdk-go/aws/credentials"
 
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
@@ -25,15 +29,16 @@ var (
 
 type FilesService struct {
 	minIO *minio.Client
+	db    *sql.DB
 }
 
 // NewProjectService creates a new instance of ProjectService.
-func NewFilesService(minIO *minio.Client) *FilesService {
-	return &FilesService{minIO: minIO}
+func NewFilesService(minIO *minio.Client, db *sql.DB) *FilesService {
+	return &FilesService{minIO: minIO, db: db}
 
 }
 
-func uploadDirectoryToS3(minIO *minio.Client, localDirectoryPath, s3BaseKey string) error {
+func uploadDirectoryToS3(db *sql.DB, minIO *minio.Client, localDirectoryPath, s3BaseKey string) error {
 	// List files and subdirectories in the local directory
 	files, err := os.ReadDir(localDirectoryPath)
 	if err != nil {
@@ -50,16 +55,17 @@ func uploadDirectoryToS3(minIO *minio.Client, localDirectoryPath, s3BaseKey stri
 
 		if file.IsDir() {
 			// If it's a subdirectory, recursively upload its contents
-			err := uploadDirectoryToS3(minIO, filePath, s3ObjectKey)
+			err := uploadDirectoryToS3(db, minIO, filePath, s3ObjectKey)
 			if err != nil {
 				return err
 			}
 		} else {
 			// If it's a file, upload it to S3
-			err := uploadFileToMinio_tmp(minIO, s3ObjectKey, filePath)
+			err := uploadFileToMinio_tmp(minIO, db, s3ObjectKey, filePath)
 			if err != nil {
 				return err
 			}
+
 		}
 	}
 
@@ -222,7 +228,7 @@ func (fs *FilesService) uploadDirectoryHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	// Call the uploadDirectoryToS3 function
-	err := uploadDirectoryToS3(fs.minIO, localPath, s3BaseKey)
+	err := uploadDirectoryToS3(fs.db, fs.minIO, localPath, s3BaseKey)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error uploading directory: %v", err), http.StatusInternalServerError)
 		return
@@ -257,7 +263,7 @@ func ListFilesInMinioDirectory(minioClient *minio.Client, bucketName, directoryP
 	return fileKeys, nil
 }
 
-func DeleteFileFromMinIO(minioClient *minio.Client, bucketName, objectName string) error {
+func DeleteFileFromMinIO(minioClient *minio.Client, db *sql.DB, bucketName, objectName string) error {
 	// Set context to cancel operation after a certain timeout if needed
 	ctx := context.Background()
 
@@ -267,7 +273,32 @@ func DeleteFileFromMinIO(minioClient *minio.Client, bucketName, objectName strin
 		return err
 	}
 
+	id, err := getFileIDByObjectKey(db, objectName)
+	if err != nil {
+		return err
+	}
+
+	err = deleteFileByID(db, id)
+	if err != nil {
+		return err
+	}
+
 	log.Println("File", objectName, "deleted successfully from bucket", bucketName)
+	return nil
+}
+
+// Function to delete a record from the 'files' table by ID
+func deleteFileByID(db *sql.DB, id string) error {
+	// Prepare the SQL query
+	query := "DELETE FROM files WHERE id = ?"
+
+	// Execute the SQL query
+	_, err := db.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("error deleting file from 'files' table: %w", err)
+	}
+
+	fmt.Printf("File with ID %d deleted successfully.\n", id)
 	return nil
 }
 
@@ -281,7 +312,7 @@ func (fs *FilesService) DeleteFileHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	err := DeleteFileFromMinIO(fs.minIO, bucketName, fileKey)
+	err := DeleteFileFromMinIO(fs.minIO, fs.db, bucketName, fileKey)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error deleting file or directory: %v", err), http.StatusInternalServerError)
 		return
@@ -291,7 +322,7 @@ func (fs *FilesService) DeleteFileHandler(w http.ResponseWriter, r *http.Request
 }
 
 // DeleteFilesInDirectory deletes all files in the specified directory of the bucket.
-func DeleteFilesInDirectory(minioClient *minio.Client, directoryKey string) error {
+func DeleteFilesInDirectory(minioClient *minio.Client, db *sql.DB, directoryKey string) error {
 	// Set context to cancel operation after a certain timeout if needed
 	ctx := context.Background()
 
@@ -310,9 +341,14 @@ func DeleteFilesInDirectory(minioClient *minio.Client, directoryKey string) erro
 			continue
 		}
 		// Delete each file
-		err := minioClient.RemoveObject(ctx, bucketName, object.Key, minio.RemoveObjectOptions{})
+		/*err := minioClient.RemoveObject(ctx, bucketName, object.Key, minio.RemoveObjectOptions{})
 		if err != nil {
 			return err
+		}*/
+
+		err := DeleteFileFromMinIO(minioClient, db, bucketName, object.Key)
+		if err != nil {
+			return object.Err
 		}
 		log.Println("File", object.Key, "deleted successfully from bucket", bucketName)
 	}
@@ -330,7 +366,7 @@ func (fs *FilesService) DeleteDirectoryHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	err := DeleteFilesInDirectory(fs.minIO, folderKey)
+	err := DeleteFilesInDirectory(fs.minIO, fs.db, folderKey)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -356,8 +392,104 @@ func newMinioSession_TMP() (*minio.Client, error) {
 	return minioClient, nil
 }
 
+// Function to insert file information into the 'files' table
+func insertFileInfo(db *sql.DB, fileName, fileType string, fileSize int64) error {
+	// Prepare the SQL query
+	query := "INSERT INTO files (id, project_id, file_name, file_size, file_type) VALUES (?, ?, ?, ?, ?)"
+
+	//
+	id := uuid.New().String()
+
+	// Execute the SQL query
+	_, err := db.Exec(query, id, "3fd0f0d4-ee52-4ce4-9e6a-7fe3e7db2e5c", fileName, fileSize, fileType)
+	if err != nil {
+		return fmt.Errorf("error inserting file info into 'files' table: %w", err)
+	}
+
+	fmt.Println("File information inserted into 'files' table successfully.")
+	return nil
+}
+
+// Function to update file information in the 'files' table based on ID
+func updateFileInfoByID(db *sql.DB, id string, fileName, fileType string, fileSize int64) error {
+	// Prepare the SQL query
+	query := "UPDATE files SET file_name=?, file_type=?, file_size=? WHERE id=?"
+
+	// Execute the SQL query
+	_, err := db.Exec(query, fileName, fileType, fileSize, id)
+	if err != nil {
+		return fmt.Errorf("error updating file info in 'files' table: %w", err)
+	}
+
+	fmt.Printf("File information with ID %d updated successfully.\n", id)
+	return nil
+}
+
 // Function to upload a file to a MinIO bucket
-func uploadFileToMinio_tmp(minioClient *minio.Client, objectKey, filePath string) error {
+func uploadFileToMinio_tmp(minioClient *minio.Client, db *sql.DB, objectKey, filePath string) error {
+	// Open the file
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("error opening file: %w", err)
+	}
+	defer file.Close()
+
+	fmt.Println(objectKey)
+
+	// Get file stats to determine file size
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("error getting file info: %w", err)
+	}
+
+	// Get file size
+	fileSize := fileInfo.Size()
+
+	// Get file name
+	//fileName := filepath.Base(filePath)
+
+	// Get file type (MIME type)
+	fileType := mime.TypeByExtension(filepath.Ext(filePath))
+
+	// Create a context
+	ctx := context.Background()
+
+	// Upload the file to the bucket
+	_, err = minioClient.PutObject(ctx, bucketName, objectKey, file, fileInfo.Size(), minio.PutObjectOptions{})
+	if err != nil {
+		return fmt.Errorf("error uploading file to bucket: %w", err)
+	}
+
+	err = insertFileInfo(db, objectKey, fileType, fileSize)
+	if err != nil {
+		return fmt.Errorf("error uploading record to DB: %w", err)
+	}
+
+	fmt.Println("File uploaded successfully.")
+	return nil
+}
+
+// handler to update a file
+func (fs *FilesService) updateProjectFilesHandler(w http.ResponseWriter, r *http.Request) {
+
+	// Parse query parameters
+	fileKey := r.URL.Query().Get("fileKey")
+	filePath := r.URL.Query().Get("filePath")
+
+	if fileKey == "" || filePath == "" {
+		http.Error(w, "Both fileKey or filePath are required parameters", http.StatusBadRequest)
+		return
+	}
+
+	err := updateFileInMinio_tmp(fs.minIO, fs.db, fileKey, filePath)
+	if err != nil {
+		http.Error(w, "error updating files", http.StatusBadRequest)
+		return
+	}
+}
+
+// Function to update a file in a MinIO bucket
+func updateFileInMinio_tmp(minioClient *minio.Client, db *sql.DB, objectKey, filePath string) error {
 	// Open the file
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -367,6 +499,25 @@ func uploadFileToMinio_tmp(minioClient *minio.Client, objectKey, filePath string
 
 	// Get file stats to determine file size
 	fileInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("error getting file info: %w", err)
+	}
+
+	// Get file size
+	fileSize := fileInfo.Size()
+
+	// Get file name
+	//fileName := filepath.Base(filePath)
+
+	// Get file type (MIME type)
+	fileType := mime.TypeByExtension(filepath.Ext(filePath))
+
+	id, err := getFileIDByObjectKey(db, objectKey)
+	if err != nil {
+		return fmt.Errorf("error getting file ID: %w", err)
+	}
+
+	err = updateFileInfoByID(db, id, objectKey, fileType, fileSize)
 	if err != nil {
 		return fmt.Errorf("error getting file info: %w", err)
 	}
@@ -412,6 +563,26 @@ func downloadFileFromMinio_tmp(minioClient *minio.Client, bucketName, objectName
 	return nil
 }
 
+// Function to get file ID by matching file name
+func getFileIDByObjectKey(db *sql.DB, fileKey string) (string, error) {
+	// Prepare the SQL query
+	query := "SELECT id FROM files WHERE file_name = ?"
+
+	// Execute the SQL query
+	var id string
+	err := db.QueryRow(query, fileKey).Scan(&id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// Handle the case where no record is found
+			return "", fmt.Errorf("file with name %s not found", fileKey)
+		}
+		return "", fmt.Errorf("error getting file ID: %w", err)
+	}
+
+	// Return the file ID
+	return id, nil
+}
+
 // GenerateDownloadURL generates a presigned URL for downloading a directory from MinIO
 func GenerateDownloadURL(minioClient *minio.Client, bucketName, directoryPath string, expiry time.Duration) (string, error) {
 	// Set context
@@ -426,6 +597,35 @@ func GenerateDownloadURL(minioClient *minio.Client, bucketName, directoryPath st
 	return presignedURL.String(), nil
 }
 
+func connectToDB() (*sql.DB, error) {
+
+	// Connection parameters
+	username := "root"
+	password := "rohan123"
+	host := "localhost"
+	port := "3306"
+	dbName := "File_Sharing_System"
+
+	// Create a DSN (Data Source Name)
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", username, password, host, port, dbName)
+
+	// Open a connection to the database
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("error opening DB: %w", err)
+	}
+
+	// Ping the database to check if the connection is successful
+	err = db.Ping()
+	if err != nil {
+		return nil, fmt.Errorf("error pinging to DB: %w", err)
+	}
+
+	fmt.Println("Connected to MySQL!")
+	return db, nil
+
+}
+
 func main() {
 
 	minioClient, err := newMinioSession_TMP()
@@ -433,12 +633,19 @@ func main() {
 		log.Fatalln("Error creating MinIO session:", err)
 	}
 
-	FilesService := NewFilesService(minioClient)
+	db, err := connectToDB()
+	if err != nil {
+		log.Fatalln("Error connecting to DB:", err)
+	}
+	defer db.Close()
+
+	FilesService := NewFilesService(minioClient, db)
 
 	http.HandleFunc("/uploadProjectFiles", FilesService.uploadDirectoryHandler)
 	http.HandleFunc("/downloadProjectFiles", FilesService.downloadFolderHandler)
 	http.HandleFunc("/deleteProjectFiles", FilesService.DeleteFileHandler)
 	http.HandleFunc("/deleteDirectory", FilesService.DeleteDirectoryHandler)
+	http.HandleFunc("/updateProjectFiles", FilesService.updateProjectFilesHandler)
 
 	// Start the server on port 8081
 	err = http.ListenAndServe(":8080", nil)
