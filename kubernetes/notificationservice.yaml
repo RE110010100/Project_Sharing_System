@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notificationservice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notificationservice
+  template:
+    metadata:
+      labels:
+        app: notificationservice
+    spec:
+      containers:
+      - name: notificationservice
+        image: rohan404/notificationservice:latest
+        ports:
+        - containerPort: 8085
+        env:
+        - name: MYSQL_HOST
+          value: mysql
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notificationservice
+spec:
+  ports:
+  - port: 8085
+    targetPort: 8085
+  selector:
+    app: notificationservice
+

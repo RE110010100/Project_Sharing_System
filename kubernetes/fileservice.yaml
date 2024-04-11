@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fileservice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fileservice
+  template:
+    metadata:
+      labels:
+        app: fileservice
+    spec:
+      containers:
+      - name: fileservice
+        image: rohan404/fileservice:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: MYSQL_HOST
+          value: mysql
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fileservice
+spec:
+  ports:
+  - port: 8080
+    targetPort: 8080
+  selector:
+    app: fileservice
+

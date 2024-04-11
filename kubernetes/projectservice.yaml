@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: projectservice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: projectservice
+  template:
+    metadata:
+      labels:
+        app: projectservice
+    spec:
+      containers:
+      - name: projectservice
+        image: rohan404/projectservice:latest
+        ports:
+        - containerPort: 8082
+        env:
+        - name: MYSQL_HOST
+          value: mysql
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: projectservice
+spec:
+  ports:
+  - port: 8082
+    targetPort: 8082
+  selector:
+    app: projectservice
+

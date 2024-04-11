@@ -1,0 +1,48 @@
+# minio-deployment-service.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+      - name: minio
+        image: quay.io/minio/minio:latest
+        ports:
+        - containerPort: 9000
+        env:
+        - name: MINIO_ACCESS_KEY
+          value: "minio_user"
+        - name: MINIO_SECRET_KEY
+          value: "minio_password"
+        args:
+        - server
+        - /data
+        volumeMounts:
+        - name: storage
+          mountPath: /data
+      volumes:
+      - name: storage
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+spec:
+  selector:
+    app: minio
+  ports:
+    - protocol: TCP
+      port: 9000
+      targetPort: 9000

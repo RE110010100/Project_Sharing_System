@@ -1,0 +1,188 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+type Notification struct {
+	recordedTime string
+	message      string
+}
+
+type UserNotifications struct {
+	name          string
+	userid        string
+	notifications []Notification
+}
+
+func connectToMongoDB() *mongo.Client {
+	// Set client options
+	clientOptions := options.Client().ApplyURI("mongodb://localhost:27017")
+
+	// Connect to MongoDB
+	client, err := mongo.Connect(context.Background(), clientOptions)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Check the connection
+	err = client.Ping(context.Background(), nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Connected to MongoDB!")
+
+	return client
+}
+
+func insertNotificationToDB(client *mongo.Client, notifications *UserNotifications) (*mongo.InsertOneResult, error) {
+
+	// Get a handle for your collection
+	collection := client.Database("NotificationsDB").Collection("UserNotifications")
+
+	// Define the index model
+	indexModel := mongo.IndexModel{
+		Keys:    bson.M{"UserID": 1}, // Replace "your_field_name" with the field you want to make unique
+		Options: options.Index().SetUnique(true),
+	}
+
+	// Create the index
+	_, err := collection.Indexes().CreateOne(context.Background(), indexModel)
+	if err != nil {
+		log.Fatal(err)
+		return nil, err
+	}
+
+	// Insert the person document into the collection
+	insertResult, err := collection.InsertOne(context.Background(), notifications)
+	if err != nil {
+		log.Fatal(err)
+		return nil, err
+	}
+
+	return insertResult, nil
+
+}
+
+func appendNotification(client *mongo.Client, personID string, notification []Notification) (*mongo.UpdateResult, error) {
+	// Access the specific database and collection
+	database := client.Database("NotificationsDB")
+	collection := database.Collection("UserNotifications")
+
+	// Filter to find the person by their ID
+	filter := bson.M{"userid": personID}
+
+	// Update to append the notification to the notifications slice
+	update := bson.M{"$set": bson.M{"notifications": notification}}
+
+	// Update the document in the collection
+	up, err := collection.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		log.Fatal(err)
+		return nil, err
+	}
+
+	return up, err
+}
+
+func NewNotification(message string) Notification {
+	currentTime := time.Now().Format("2006-01-02 15:04:05")
+	notification := Notification{
+		recordedTime: currentTime,
+		message:      message,
+	}
+
+	return notification
+}
+
+func NewUserNotifications(name string, userID string) *UserNotifications {
+	return &UserNotifications{
+		name:   name,
+		userid: userID,
+	}
+}
+
+func getPersonByID(client *mongo.Client, userID string) (*UserNotifications, error) {
+	// Access the specific database and collection
+	database := client.Database("NotificationsDB")
+	collection := database.Collection("UserNotifications")
+
+	// Filter to find the person by their ID
+	filter := bson.M{"UserID": userID}
+
+	// Find the document in the collection
+	var person UserNotifications
+	err := collection.FindOne(context.Background(), filter).Decode(&person)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			fmt.Println("No document found for the provided user ID")
+			return nil, nil
+		}
+		log.Fatal(err)
+		return nil, err
+	}
+
+	return &person, nil
+}
+
+func main() {
+
+	//connect to MongoDB
+	client := connectToMongoDB()
+
+	// Disconnect client when finished
+	defer func() {
+		if err := client.Disconnect(context.Background()); err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	var notif []Notification
+
+	Notification := NewNotification("hello")
+
+	notif = append(notif, Notification)
+
+	fmt.Println(Notification)
+
+	updateresult, err := appendNotification(client, "example_user", notif)
+	if err != nil {
+		fmt.Print(err)
+	}
+
+	// Get Person document by ID
+	/*userID := "example_user"
+	person, err := getPersonByID(client, userID)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Print the retrieved Person document
+	if person != nil {
+		fmt.Println("Name:", person.name)
+		fmt.Println("UserID:", person.userid)
+		fmt.Println("Notifications:")
+		for _, notification := range person.notifications {
+			fmt.Println("  Recorded Time:", notification.recordedTime)
+			fmt.Println("  Message:", notification.message)
+		}
+	}*/
+
+	/*usernotifications := NewUserNotifications("Rohan", "example_user")
+
+	insertResult, err := insertNotificationToDB(client, usernotifications)
+
+	if err != nil {
+		fmt.Print(err)
+	}*/
+
+	fmt.Println("Inserted document ID:", updateresult)
+}
