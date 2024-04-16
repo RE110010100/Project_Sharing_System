@@ -89,7 +89,3 @@ Kubernetes Deployment
 
    ```bash
    http://<minikube-ip>:<node-port>
-
-
-
-
