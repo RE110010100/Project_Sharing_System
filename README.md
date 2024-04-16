@@ -43,12 +43,12 @@ To set up the frontend:
    cd web/project_sharing_system_frontend
 
 2. Install the necessary packages:
-  ```bash
-  npm install
+   ```bash
+   npm install
 
 3. Start the development server to run the frontend:
-  ```bash
-  npm start
+   ```bash
+   npm start
 
 
 Deployment on Minikube
@@ -56,24 +56,24 @@ Kubernetes Deployment
 
 1. Ensure Minikube is active and configured to use Docker:
 
-  ```bash
-  minikube start
-  eval $(minikube docker-env)
+   ```bash
+   minikube start
+   eval $(minikube docker-env)
 
 2. Build and tag Docker images for each backend service:
 
-  ```bash
-  docker build -t <service-name>:latest .
+   ```bash
+   docker build -t <service-name>:latest .
 
 3. Deploy the services using Kubernetes:
 
-  ```bash
-  kubectl apply -f kubernetes/
+   ```bash
+   kubectl apply -f kubernetes/
 
 4. The frontend can typically be accessed via the Minikube IP and the NodePort specified in the service's Kubernetes configuration:
 
-  ```bash
-  http://<minikube-ip>:<node-port>
+   ```bash
+   http://<minikube-ip>:<node-port>
 
 
 
