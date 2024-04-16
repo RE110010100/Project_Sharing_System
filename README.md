@@ -35,8 +35,7 @@ To set up the backend services:
    cd <service-directory>
    go run main.go
 
-
-Setting Up the Frontend
+### Setting Up the Frontend
 To set up the frontend:
 
 1. Navigate to the frontend directory:
