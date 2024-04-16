@@ -30,7 +30,23 @@ To set up the backend services:
    ```bash
    git clone git@github.com:RE110010100/Project_Sharing_System.git
 
-2. For each backend service (fileservice, notificationservice, projectservice, searchservice), navigate to its directory and build :
+2. MYSQL server setup using Dockers
+   ```bash
+   docker run --name mysql-server -e MYSQL_ROOT_PASSWORD=yourpassword -p 3306:3306 -d mysql:latest
+
+3. Redis Server setup using Dockers
+   ```bash
+   docker run --name redis-server -p 6379:6379 -d redis:latest
+
+4. MinIO server setup using Dockers
+   ```bash
+   docker run -p 9000:9000 -p 9001:9001 --name minio-server -e "MINIO_ROOT_USER=admin" -e "MINIO_ROOT_PASSWORD=password" minio/minio server /data --console-address ":9001"
+
+5. MongoDB server setup using Dockers
+   ```bash
+   docker run --name mongodb-server -p 27017:27017 -e MONGO_INITDB_ROOT_USERNAME=admin -e MONGO_INITDB_ROOT_PASSWORD=password -d mongo:latest
+
+6. For each backend service (fileservice, notificationservice, projectservice, searchservice), navigate to its directory and build :
    ```bash
    cd <service-directory>
    go run main.go
@@ -49,7 +65,6 @@ To set up the frontend:
 3. Start the development server to run the frontend:
    ```bash
    npm start
-
 
 Deployment on Minikube
 Kubernetes Deployment
