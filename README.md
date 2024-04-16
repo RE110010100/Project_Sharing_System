@@ -24,8 +24,58 @@ To run and deploy the Project Sharing System, you will need:
 
 ## Installation
 
-### Setting Up Backend Services
+### Setting Up Backend Services (on localhost)
 To set up the backend services:
 1. Clone the project repository:
    ```bash
-   git clone 
+   git clone git@github.com:RE110010100/Project_Sharing_System.git
+
+2. For each backend service (fileservice, notificationservice, projectservice, searchservice), navigate to its directory and build :
+   ```bash
+   cd <service-directory>
+   go run main.go
+
+
+Setting Up the Frontend
+To set up the frontend:
+
+1. Navigate to the frontend directory:
+   ```bash
+   cd web/project_sharing_system_frontend
+
+2. Install the necessary packages:
+  ```bash
+  npm install
+
+3. Start the development server to run the frontend:
+  ```bash
+  npm start
+
+
+Deployment on Minikube
+Kubernetes Deployment
+
+1. Ensure Minikube is active and configured to use Docker:
+
+  ```bash
+  minikube start
+  eval $(minikube docker-env)
+
+2. Build and tag Docker images for each backend service:
+
+  ```bash
+  docker build -t <service-name>:latest .
+
+3. Deploy the services using Kubernetes:
+
+  ```bash
+  kubectl apply -f kubernetes/
+
+4. The frontend can typically be accessed via the Minikube IP and the NodePort specified in the service's Kubernetes configuration:
+
+  ```bash
+  http://<minikube-ip>:<node-port>
+
+
+
+
